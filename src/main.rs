@@ -8,7 +8,7 @@ fn main() {
     for i in 1..14 {
         println!("the head is: {}", &rb.head);
         println!("the tail is: {}", &rb.tail);
-        &rb.try_push(i);
+        let _ = rb.try_push(i);
     }
     dbg!(&rb);
 

@@ -62,7 +62,7 @@ impl<T> RingBuffer<T> {
         let index = (self.head as usize) % self.capacity;
         self.head += 1;
         println!("the head is: {}", self.head);
-        return self.data[index].take();
+        self.data[index].take()
     }
     // we own the value with a push
     pub fn try_push(&mut self, value: T) -> Result<(), T> {
@@ -73,7 +73,7 @@ impl<T> RingBuffer<T> {
         let index = (self.tail as usize) % self.capacity;
         self.data[index] = Option::Some(value);
         self.tail += 1;
-        return Ok(());
+        Ok(())
     }
 }
 
