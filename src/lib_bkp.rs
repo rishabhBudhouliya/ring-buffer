@@ -6,10 +6,10 @@
  *
  */
 #[derive(Debug)]
-pub struct RingBuffer {
-    //  bunch of bytes
-    data: Vec<u8>,
-    // apparently, 64 bytes is good for cache coherency
+pub struct RingBuffer<T> {
+    //  bunch of bytes -- no, a bunch of generic types
+    data: Vec<Option<T>>,
+    // apparently, 64 bytes is good for cache coherency?
     pub head: u32,
     pub tail: u32,
     capacity: usize,
@@ -20,13 +20,15 @@ pub struct RingBuffer {
 
 // concerns in impl-aug-25.txt
 
-impl RingBuffer {
+impl<T> RingBuffer<T> {
     pub fn new(capacity: usize) -> Self {
         if capacity > u32::MAX as usize {
             panic!("can construct larger than u32 max")
         }
+        let mut data_alloc: Vec<Option<T>> = Vec::with_capacity(capacity);
+        data_alloc.resize_with(capacity, || None);
         RingBuffer {
-            data: vec![0; capacity],
+            data: data_alloc,
             head: 0,
             tail: 0,
             capacity,
@@ -42,51 +44,109 @@ impl RingBuffer {
     }
 
     // what can we pop?
-    pub fn peek(&self) -> u32 {
+    // a peek should not take an actual slot value
+    pub fn peek(&self) -> &Option<T> {
         if self.is_empty() {
             println!("sorry there's nothing to peek");
-            return 0;
+            return &None;
         }
         let index = (self.head as usize) % self.capacity;
-        dbg!(index);
-        let mut result = [0; 4];
-        let mut counter = 0;
-        for ifx in index..index + 4 {
-            result[counter] = self.data[ifx % self.capacity];
-            counter += 1;
-        }
-        dbg!(result);
-        return u32::from_be_bytes(result);
+        return &self.data[index];
     }
 
-    pub fn pop(&mut self) -> u32 {
+    pub fn pop(&mut self) -> Option<T> {
         if self.is_empty() {
             println!("sorry there's nothing to pop");
-            return 0;
+            return None;
         }
-        let index = ((self.head as usize) % self.capacity);
-        let mut result = [0; 4];
-        let mut counter = 0;
-        for ifx in (index..index + 4) {
-            result[counter] = self.data[ifx % self.capacity];
-            counter += 1;
-        }
-        self.head += 4;
-        return u32::from_be_bytes(result);
+        let index = (self.head as usize) % self.capacity;
+        self.head += 1;
+        return self.data[index].take();
     }
-
-    pub fn push(&mut self, value: u32) {
+    // we own the value with a push
+    pub fn try_push(&mut self, value: T) -> Result<(), T> {
         if self.is_full() {
             println!("sorry no space left");
-            return;
+            return Err(value);
         }
-        let index = (self.tail as usize);
-        let result = u32::to_be_bytes(value);
-        let mut counter = 0;
-        for idx in (index..index + 4) {
-            self.data[idx % self.capacity] = result[counter];
-            counter += 1;
+        let index = (self.tail as usize) % self.capacity;
+        self.data[index] = Option::Some(value);
+        self.tail += 1;
+        return Ok(());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /*
+     * Push until the buffer gets full
+     */
+    #[test]
+    fn push_until_full() {
+        const CAPACITY: usize = 10;
+        let mut rb = self::RingBuffer::new(CAPACITY);
+        // try to fill 12 items into a fixed size buffer
+        for data in 1..13 {
+            let result = rb.try_push(data);
+            match result {
+                Err(val) => {
+                    assert_eq!(rb.is_full(), true);
+                    assert_eq!(val, data)
+                }
+                Ok(()) => assert!(check(rb.capacity, data)),
+            }
         }
-        self.tail += 4
+        assert_eq!(rb.is_full(), true);
+        assert_eq!(rb.peek().unwrap(), 1);
+    }
+
+    fn check(capacity: usize, itr: usize) -> bool {
+        capacity >= itr
+    }
+
+    #[test]
+    fn pop_until_empty() {
+        const CAPACITY: usize = 10;
+        let mut rb = RingBuffer::new(CAPACITY);
+        for i in 0..9 {
+            let r = rb.try_push(i);
+            match r {
+                Err(val) => println!("couldn't push: {val}"),
+                _ => (),
+            }
+        }
+
+        for i in 0..9 {
+            let popped = rb.pop();
+            assert_eq!(popped.unwrap(), i);
+        }
+    }
+
+    #[test]
+    fn wrap_around() {
+        let mut rb = RingBuffer::new(4);
+        // [0, 1, 2, 0]
+        //  ^H       ^T
+        for i in 0..2 {
+            rb.try_push(i);
+        }
+        // [0, 1, 2, 0]
+        //        ^H ^T
+        for _ in 0..1 {
+            rb.pop();
+        }
+        // [1, 2, 2, 0]
+        //     ^T ^H
+        for i in 0..2 {
+            rb.try_push(i);
+        }
+        //
+        assert_eq!(rb.pop().unwrap(), 2);
+        assert_eq!(rb.pop().unwrap(), 0);
+        assert_eq!(rb.pop().unwrap(), 1);
+        assert_eq!(rb.pop().unwrap(), 2);
+        assert_eq!(rb.is_empty(), true);
     }
 }
