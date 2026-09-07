@@ -45,13 +45,13 @@ impl<T> RingBuffer<T> {
 
     // what can we pop?
     // a peek should not take an actual slot value
-    pub fn peek(&self) -> &Option<T> {
+    pub fn peek(&self) -> Option<&T> {
         if self.is_empty() {
             println!("sorry there's nothing to peek");
-            return &None;
+            return None;
         }
         let index = (self.head as usize) % self.capacity;
-        return &self.data[index];
+        self.data[index].as_ref()
     }
 
     pub fn pop(&mut self) -> Option<T> {
@@ -61,6 +61,7 @@ impl<T> RingBuffer<T> {
         }
         let index = (self.head as usize) % self.capacity;
         self.head += 1;
+        println!("the head is: {}", self.head);
         return self.data[index].take();
     }
     // we own the value with a push
@@ -99,7 +100,7 @@ mod tests {
             }
         }
         assert_eq!(rb.is_full(), true);
-        assert_eq!(rb.peek().unwrap(), 1);
+        assert_eq!(*rb.peek().unwrap(), 1);
     }
 
     fn check(capacity: usize, itr: usize) -> bool {
@@ -129,18 +130,22 @@ mod tests {
         let mut rb = RingBuffer::new(4);
         // [0, 1, 2, 0]
         //  ^H       ^T
-        for i in 0..2 {
+        for i in 0..3 {
             rb.try_push(i);
         }
         // [0, 1, 2, 0]
         //        ^H ^T
-        for _ in 0..1 {
+        for _ in 0..2 {
             rb.pop();
         }
         // [1, 2, 2, 0]
         //     ^T ^H
-        for i in 0..2 {
-            rb.try_push(i);
+        for i in 0..3 {
+            let r = rb.try_push(i);
+            match r {
+                Err(val) => println!("unable to push {val}"),
+                _ => (),
+            }
         }
         //
         assert_eq!(rb.pop().unwrap(), 2);
@@ -148,5 +153,16 @@ mod tests {
         assert_eq!(rb.pop().unwrap(), 1);
         assert_eq!(rb.pop().unwrap(), 2);
         assert_eq!(rb.is_empty(), true);
+    }
+
+    #[test]
+    fn test_front() {
+        let mut rb = RingBuffer::new(3);
+        rb.try_push(String::from("test1"));
+        rb.try_push(String::from("test2"));
+        rb.try_push(String::from("test3"));
+        let b = rb.peek();
+        let c = rb.peek();
+        assert_eq!(b.unwrap(), c.unwrap());
     }
 }

@@ -8,10 +8,11 @@ fn main() {
     for i in 1..14 {
         println!("the head is: {}", &rb.head);
         println!("the tail is: {}", &rb.tail);
-        &rb.push(i);
+        &rb.try_push(i);
     }
     dbg!(&rb);
-    assert_eq!(*(&rb.peek()), 1);
+
+    assert_eq!(*rb.peek().unwrap(), 1);
 
     // let assert_ret = 1;
     // for _ in ..3 {
@@ -19,5 +20,5 @@ fn main() {
     //     assert_eq!(ret, assert_ret);
     // }
 
-    println!("{}", &rb.peek());
+    println!("{}", &rb.peek().unwrap());
 }
