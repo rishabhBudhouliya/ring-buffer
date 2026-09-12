@@ -1,24 +1,73 @@
-// use ring_buffer::;
-// use ring_buffer
+use std::sync::Condvar;
+use std::{sync::Mutex, thread, time::Duration};
+
+use crate::lib_bkp::RingBuffer;
 
 mod lib_bkp;
 
-fn main() {
-    let mut rb = lib_bkp::RingBuffer::new(12);
-    for i in 1..14 {
-        println!("the head is: {}", &rb.head);
-        println!("the tail is: {}", &rb.tail);
-        let _ = rb.try_push(i);
+/*
+*
+*/
+
+fn consumer(rb: &Mutex<RingBuffer<u32>>, total: u32, wait_lock: &Condvar, wait_producer: &Condvar) {
+    let mut count = 0;
+    loop {
+        let mut guard_on_ring_buffer = rb.lock().unwrap();
+        if guard_on_ring_buffer.is_empty() {
+            if count == total {
+                drop(guard_on_ring_buffer);
+                break;
+            }
+            guard_on_ring_buffer = wait_lock.wait(guard_on_ring_buffer).unwrap();
+        } else {
+            guard_on_ring_buffer.pop();
+            drop(guard_on_ring_buffer);
+            wait_producer.notify_one();
+            count += 1;
+        }
     }
-    dbg!(&rb);
+    println!("count is : {}", count);
+    assert_eq!(count, total);
+}
 
-    assert_eq!(*rb.peek().unwrap(), 1);
+fn producer(rb: &Mutex<RingBuffer<u32>>, total: u32, wait_lock: &Condvar, wait_producer: &Condvar) {
+    for i in 0..total {
+        let mut g_ret = rb.lock().unwrap();
+        let ret = g_ret.try_push(i);
+        match ret {
+            Err(val) => loop {
+                if g_ret.is_full() {
+                    g_ret = wait_producer.wait(g_ret).unwrap();
+                } else {
+                    let retry = g_ret.try_push(val);
+                    if retry.is_ok() {
+                        drop(g_ret);
+                        wait_lock.notify_one();
+                        break;
+                    }
+                }
+            },
+            Ok(()) => {
+                drop(g_ret);
+                wait_lock.notify_one()
+            }
+        }
+    }
+    println!("producer finished its job");
+}
 
-    // let assert_ret = 1;
-    // for _ in ..3 {
-    //     let ret = &rb.pop();
-    //     assert_eq!(ret, assert_ret);
-    // }
-
-    println!("{}", &rb.peek().unwrap());
+fn main() {
+    // main thread will be the producer 10000000
+    let total: u32 = 10000000; // 10 million
+    let rb = Mutex::new(lib_bkp::RingBuffer::new(1024));
+    let start = std::time::Instant::now();
+    let wait_lock = Condvar::new();
+    let wait_producer = Condvar::new();
+    std::thread::scope(|s| {
+        s.spawn(|| producer(&rb, total, &wait_lock, &wait_producer));
+        s.spawn(|| consumer(&rb, total, &wait_lock, &wait_producer));
+    });
+    let end = std::time::Instant::now();
+    let ops = (total as f32) / ((end - start).as_secs_f32());
+    println!("ops/s performed while processing: {total} is {}", ops);
 }

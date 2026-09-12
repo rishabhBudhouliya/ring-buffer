@@ -35,11 +35,11 @@ impl<T> RingBuffer<T> {
         }
     }
 
-    fn is_full(&self) -> bool {
+    pub fn is_full(&self) -> bool {
         (self.tail - self.head) == (self.capacity as u32)
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.head == self.tail
     }
 
@@ -61,13 +61,12 @@ impl<T> RingBuffer<T> {
         }
         let index = (self.head as usize) % self.capacity;
         self.head += 1;
-        println!("the head is: {}", self.head);
         self.data[index].take()
     }
     // we own the value with a push
     pub fn try_push(&mut self, value: T) -> Result<(), T> {
         if self.is_full() {
-            println!("sorry no space left");
+            // println!("sorry no space left");
             return Err(value);
         }
         let index = (self.tail as usize) % self.capacity;
