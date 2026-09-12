@@ -30,6 +30,33 @@ fn consumer(rb: &Mutex<RingBuffer<u32>>, total: u32, wait_lock: &Condvar, wait_p
     assert_eq!(count, total);
 }
 
+// Earlier variant, restored verbatim: holds the lock across the whole drain and
+// notifies while still holding it. Kept so the two can be benchmarked side by side.
+fn consumer_batch(
+    rb: &Mutex<RingBuffer<u32>>,
+    total: u32,
+    wait_lock: &Condvar,
+    wait_producer: &Condvar,
+) {
+    let mut count = 0;
+    let mut guard_on_ring_buffer = rb.lock().unwrap();
+    loop {
+        if guard_on_ring_buffer.is_empty() {
+            if count == total {
+                drop(guard_on_ring_buffer);
+                break;
+            }
+            guard_on_ring_buffer = wait_lock.wait(guard_on_ring_buffer).unwrap();
+        } else {
+            guard_on_ring_buffer.pop();
+            wait_producer.notify_one();
+            count += 1;
+        }
+    }
+    println!("count is : {}", count);
+    assert_eq!(count, total);
+}
+
 fn producer(rb: &Mutex<RingBuffer<u32>>, total: u32, wait_lock: &Condvar, wait_producer: &Condvar) {
     for i in 0..total {
         let mut g_ret = rb.lock().unwrap();
@@ -65,7 +92,7 @@ fn main() {
     let wait_producer = Condvar::new();
     std::thread::scope(|s| {
         s.spawn(|| producer(&rb, total, &wait_lock, &wait_producer));
-        s.spawn(|| consumer(&rb, total, &wait_lock, &wait_producer));
+        s.spawn(|| consumer_batch(&rb, total, &wait_lock, &wait_producer));
     });
     let end = std::time::Instant::now();
     let ops = (total as f32) / ((end - start).as_secs_f32());
