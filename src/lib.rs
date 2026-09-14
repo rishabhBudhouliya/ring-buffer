@@ -1,3 +1,11 @@
+pub mod lib_bkp;
+pub mod pipe;
+
+pub use lib_bkp::RingBuffer;
+pub use pipe::Pipe;
+
+// Old shared-memory draft (Exercise 5 reference), kept commented out below.
+
 // /*
 //  * Design a ring buffer backed by a shared memory and protected by a semaphore
 //  * Learn how to create and maintain a shared memory in std io
