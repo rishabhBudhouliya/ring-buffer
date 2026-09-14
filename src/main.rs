@@ -4,6 +4,7 @@ use std::{sync::Mutex, thread, time::Duration};
 use crate::lib_bkp::RingBuffer;
 
 mod lib_bkp;
+mod pipe;
 
 /*
 *
@@ -30,8 +31,8 @@ fn consumer(rb: &Mutex<RingBuffer<u32>>, total: u32, wait_lock: &Condvar, wait_p
     assert_eq!(count, total);
 }
 
-// Earlier variant, restored verbatim: holds the lock across the whole drain and
-// notifies while still holding it. Kept so the two can be benchmarked side by side.
+// Earlier variant: holds the lock across the whole drain and
+// notifies while still holding it.
 fn consumer_batch(
     rb: &Mutex<RingBuffer<u32>>,
     total: u32,
