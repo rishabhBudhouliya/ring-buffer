@@ -1,17 +1,31 @@
+use std::sync::atomic::Ordering;
+use std::{mem::MaybeUninit, sync::atomic::AtomicU32};
 /*
  * Implementing a lock free ring buffer
  * 1) create a data structure that is naive, uses a memory backed vector and pointer arithmetic
  * 2) keep reading the blog, use memory transumtation with shared memory to make life easier
  * 3) look at atomics at Rust and multi threaded
  *
+//  */
+// #[derive(Debug)]
+// pub struct RingBuffer<T> {
+//     //  bunch of bytes -- no, a bunch of generic types
+//     data: Vec<Option<T>>,
+//     // apparently, 64 bytes is good for cache coherency?
+//     pub head: u32,
+//     pub tail: u32,
+//     capacity: usize,
+// }
+
+/*
+ * This ring buffer let goes of an option<T> data unit and shifts to an unsafe variant of an option
+ * This allows to declare a ring buffer that holds no initialzed memory/object inside it.
  */
 #[derive(Debug)]
 pub struct RingBuffer<T> {
-    //  bunch of bytes -- no, a bunch of generic types
-    data: Vec<Option<T>>,
-    // apparently, 64 bytes is good for cache coherency?
-    pub head: u32,
-    pub tail: u32,
+    data: Vec<MaybeUninit<T>>,
+    pub head: AtomicU32,
+    pub tail: AtomicU32,
     capacity: usize,
 }
 
@@ -25,22 +39,23 @@ impl<T> RingBuffer<T> {
         if capacity > u32::MAX as usize {
             panic!("can construct larger than u32 max")
         }
-        let mut data_alloc: Vec<Option<T>> = Vec::with_capacity(capacity);
-        data_alloc.resize_with(capacity, || None);
+        let mut data_alloc: Vec<MaybeUninit<T>> = Vec::with_capacity(capacity);
+        data_alloc.resize_with(capacity, || MaybeUninit::uninit());
         RingBuffer {
             data: data_alloc,
-            head: 0,
-            tail: 0,
+            head: AtomicU32::new(0),
+            tail: AtomicU32::new(0),
             capacity,
         }
     }
 
     pub fn is_full(&self) -> bool {
-        (self.tail - self.head) == (self.capacity as u32)
+        (self.tail.load(Ordering::Relaxed) - self.head.load(Ordering::Relaxed))
+            == (self.capacity as u32)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.head == self.tail
+        self.head.load(Ordering::Relaxed) == self.tail.load(Ordering::Relaxed)
     }
 
     // what can we pop?
@@ -50,8 +65,9 @@ impl<T> RingBuffer<T> {
             println!("sorry there's nothing to peek");
             return None;
         }
-        let index = (self.head as usize) % self.capacity;
-        self.data[index].as_ref()
+        let index = (self.head.load(Ordering::Acquire) as usize) % self.capacity;
+        // will give out the reference of the buffer slot twice (no move semantics)
+        Option::Some(unsafe { self.data[index].assume_init_ref() })
     }
 
     pub fn pop(&mut self) -> Option<T> {
@@ -59,9 +75,10 @@ impl<T> RingBuffer<T> {
             println!("sorry there's nothing to pop");
             return None;
         }
-        let index = (self.head as usize) % self.capacity;
-        self.head += 1;
-        self.data[index].take()
+        let index = (self.head.load(Ordering::Acquire) as usize) % self.capacity;
+        // incrementing the head ptr
+        self.head.fetch_add(1, Ordering::Release);
+        Option::Some(unsafe { self.data[index].assume_init_read() })
     }
     // we own the value with a push
     pub fn try_push(&mut self, value: T) -> Result<(), T> {
@@ -69,9 +86,9 @@ impl<T> RingBuffer<T> {
             // println!("sorry no space left");
             return Err(value);
         }
-        let index = (self.tail as usize) % self.capacity;
-        self.data[index] = Option::Some(value);
-        self.tail += 1;
+        let index = (self.tail.load(Ordering::Acquire) as usize) % self.capacity;
+        self.data[index] = MaybeUninit::new(value);
+        self.tail.fetch_add(1, Ordering::Release);
         Ok(())
     }
 }
