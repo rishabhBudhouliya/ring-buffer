@@ -1,89 +1,53 @@
-use std::sync::{Condvar, Mutex};
-
 use crate::RingBuffer;
+use std::{cell::UnsafeCell, thread::sleep, time::Duration};
 
 #[derive(Debug)]
-pub struct Pipe<T> {
-    rb: Mutex<RingBuffer<T>>,
-    is_full: Condvar,
-    is_empty: Condvar,
+pub struct Producer<'a, T> {
+    rb: &'a UnsafeCell<RingBuffer<T>>,
 }
 
-impl<T> Pipe<T> {
-    pub fn new(capacity: usize) -> Self {
-        Pipe {
-            rb: Mutex::new(RingBuffer::new(capacity)),
-            is_full: Condvar::new(),
-            is_empty: Condvar::new(),
-        }
+#[derive(Debug)]
+pub struct Consumer<'a, T> {
+    rb: &'a UnsafeCell<RingBuffer<T>>,
+}
+
+unsafe impl<'a, T> Sync for Producer<'a, T> where T: Send {}
+unsafe impl<'a, T> Sync for Consumer<'a, T> where T: Send {}
+
+impl<'a, T> Producer<'a, T> {
+    pub fn new(rb: &'a UnsafeCell<RingBuffer<T>>) -> Self {
+        Producer { rb: rb }
     }
 
-    pub fn send(&self, mut message: T) {
-        let mut guard = self.rb.lock().unwrap();
-        loop {
-            if guard.is_full() {
-                guard = self.is_full.wait(guard).unwrap();
-            } else {
-                let result = guard.try_push(message);
-                self.is_empty.notify_one();
-                match result {
-                    Err(val) => message = val,
-                    Ok(()) => break,
+    pub fn send(&self, message: T) {
+        unsafe {
+            while (*self.rb.get()).is_full() {
+                println!("buffer is full, producer decides to wait");
+                sleep(Duration::from_millis(200));
+            }
+            let mut result = (*self.rb.get()).try_push(message);
+            while result.is_err() {
+                result = (*self.rb.get()).try_push(result.unwrap_err());
+                if result.is_ok() {
+                    break;
                 }
             }
         }
     }
+}
 
-    pub fn send_all(&self, messages: Vec<T>) {
-        let mut guard = self.rb.lock().unwrap();
-        for mut message in messages {
-            loop {
-                if guard.is_full() {
-                    self.is_empty.notify_one();
-                    guard = self.is_full.wait(guard).unwrap();
-                } else {
-                    let result = guard.try_push(message);
-                    match result {
-                        Err(val) => message = val,
-                        Ok(()) => break,
-                    }
-                }
-            }
-        }
-        self.is_empty.notify_one();
-    }
-
-    pub fn consume_all(&self, total: u32) -> Vec<T> {
-        let mut guard = self.rb.lock().unwrap();
-        let mut consumed_ret = Vec::<T>::new();
-        let mut count = 0;
-        loop {
-            if guard.is_empty() {
-                if count == total {
-                    self.is_full.notify_one();
-                    drop(guard);
-                    return consumed_ret;
-                }
-                self.is_full.notify_one();
-                guard = self.is_empty.wait(guard).unwrap();
-            } else {
-                let result = guard.pop();
-                consumed_ret.push(result.unwrap());
-                count += 1;
-            }
-        }
+impl<'a, T> Consumer<'a, T> {
+    pub fn new(rb: &'a UnsafeCell<RingBuffer<T>>) -> Self {
+        Consumer { rb: rb }
     }
 
     pub fn consume(&self) -> Option<T> {
-        let mut guard = self.rb.lock().unwrap();
-        loop {
-            if guard.is_empty() {
-                guard = self.is_empty.wait(guard).unwrap();
-            } else {
-                let result = guard.pop();
-                self.is_full.notify_one();
-                return result;
+        unsafe {
+            while (*self.rb.get()).is_empty() {
+                println!("buffer is empty, consumer decides to wait");
+                sleep(Duration::from_millis(200));
             }
+            (*self.rb.get()).pop()
         }
     }
 }

@@ -1,3 +1,4 @@
+use std::cell::UnsafeCell;
 use std::sync::atomic::Ordering;
 use std::{mem::MaybeUninit, sync::atomic::AtomicU32};
 /*
@@ -39,7 +40,7 @@ impl<T> RingBuffer<T> {
         if capacity > u32::MAX as usize {
             panic!("can construct larger than u32 max")
         }
-        let mut data_alloc: Vec<MaybeUninit<T>> = Vec::with_capacity(capacity);
+        let mut data_alloc = Vec::with_capacity(capacity);
         data_alloc.resize_with(capacity, || MaybeUninit::uninit());
         RingBuffer {
             data: data_alloc,
@@ -50,12 +51,12 @@ impl<T> RingBuffer<T> {
     }
 
     pub fn is_full(&self) -> bool {
-        (self.tail.load(Ordering::Relaxed) - self.head.load(Ordering::Relaxed))
+        (self.tail.load(Ordering::Relaxed) - self.head.load(Ordering::Acquire))
             == (self.capacity as u32)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.head.load(Ordering::Relaxed) == self.tail.load(Ordering::Relaxed)
+        self.head.load(Ordering::Relaxed) == self.tail.load(Ordering::Acquire)
     }
 
     // what can we pop?
@@ -75,10 +76,13 @@ impl<T> RingBuffer<T> {
             println!("sorry there's nothing to pop");
             return None;
         }
-        let index = (self.head.load(Ordering::Acquire) as usize) % self.capacity;
+        let mut head_index = self.head.load(Ordering::Relaxed);
+        let index = (head_index as usize) % self.capacity;
+        let ret = Option::Some(unsafe { self.data[index].assume_init_read() });
         // incrementing the head ptr
-        self.head.fetch_add(1, Ordering::Release);
-        Option::Some(unsafe { self.data[index].assume_init_read() })
+        head_index += 1;
+        self.head.store(head_index, Ordering::Release);
+        ret
     }
     // we own the value with a push
     pub fn try_push(&mut self, value: T) -> Result<(), T> {
@@ -86,9 +90,12 @@ impl<T> RingBuffer<T> {
             // println!("sorry no space left");
             return Err(value);
         }
-        let index = (self.tail.load(Ordering::Acquire) as usize) % self.capacity;
+        // am i getting ordering right now?
+        let mut tail_idx = self.tail.load(Ordering::Relaxed);
+        let index = (tail_idx as usize) % self.capacity;
         self.data[index] = MaybeUninit::new(value);
-        self.tail.fetch_add(1, Ordering::Release);
+        tail_idx += 1;
+        self.tail.store(tail_idx, Ordering::Release);
         Ok(())
     }
 }
