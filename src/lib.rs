@@ -2,7 +2,6 @@ pub mod lib_bkp;
 pub mod pipe;
 
 pub use lib_bkp::RingBuffer;
-pub use pipe::Pipe;
 
 // Old shared-memory draft (Exercise 5 reference), kept commented out below.
 
